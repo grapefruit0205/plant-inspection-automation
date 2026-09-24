@@ -1,0 +1,13 @@
+# clasp 설정(스크립트 ID 포함) — 저장소에 올리지 않음
+.clasp.json
+
+# Node
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 대용량 미디어(필요 시 Git LFS 사용)
+docs/demo_raw/
