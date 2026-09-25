@@ -32,7 +32,8 @@
 | 증상 | 원인 | 해결 |
 |---|---|---|
 | `TypeError: Cannot read properties of undefined (reading 'namedValues')` | 편집기에서 `onFormSubmit`을 직접 실행하면 `e`가 없음 | 반드시 폼 제출로 테스트하거나 `테스트_판정()` 사용 |
-| *(추가 예정)* | | |
+| `Exception: Specified permissions are not sufficient to call Session.getActiveUser. Required permissions: .../userinfo.email` | `appsscript.json` 매니페스트에 권한을 직접 나열했는데 `userinfo.email` 이 빠져 있었음 | 스코프 추가. 게다가 권한이 없어도 설치가 중단되지 않도록 `try/catch` 폴백을 넣어 실패 지점을 없앰 |
+| 재실행 시 "응답 탭을 찾지 못했습니다" | 첫 실행에서 이미 `원본응답` 으로 이름이 바뀌어 있어, 남은 탭을 찾는 방식이 통하지 않음 | 이름으로 먼저 찾고, 이미 있는 판정 열은 중복 추가하지 않게 수정 |
 
 ## AI에게 맡긴 것 vs 내가 한 것
 
