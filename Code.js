@@ -421,7 +421,7 @@ function 주간요약갱신(시작일) {
   };
 
   const sh = _시트(SH.주간);
-  sh.appendRow([
+  const 행 = [
     요약.주차,
     요약.시작일,
     요약.종료일,
@@ -432,7 +432,17 @@ function 주간요약갱신(시작일) {
     요약.TOP3항목,
     요약.미조치,
     '',
-  ]);
+  ];
+
+  // 같은 주가 이미 있으면 새 행을 만들지 않고 갱신한다(PDF링크 열은 보존)
+  const 기존 = sh.getDataRange().getValues();
+  for (let i = 1; i < 기존.length; i++) {
+    if (String(기존[i][0]) === 요약.주차) {
+      sh.getRange(i + 1, 1, 1, 행.length).setValues([행]);
+      return 요약;
+    }
+  }
+  sh.appendRow(행);
 
   return 요약;
 }
@@ -827,6 +837,17 @@ function 전체재판정() {
 
   if (판정열.length) sh.getRange(2, nCol, 판정열.length, 2).setValues(판정열);
   Logger.log('재판정 완료: ' + v.length + '행 중 이상 ' + 건수 + '행');
+
+  // 일일집계도 다시 계산한다(설치를 다시 하면 비워지므로). 날짜 수만큼 시간이 걸린다.
+  const ts열 = _타임스탬프열(h);
+  const 날짜모음 = {};
+  v.forEach((r) => {
+    const d = _날짜문자열(r[ts열]);
+    if (d) 날짜모음[d] = true;
+  });
+  const 날짜들 = Object.keys(날짜모음).sort();
+  날짜들.forEach((d) => 일일집계갱신(new Date(d + 'T00:00:00+09:00')));
+  Logger.log('일일집계 ' + 날짜들.length + '일 재계산 완료');
 }
 
 /* ============================ 8. 시트 메뉴 ============================ */

@@ -63,17 +63,16 @@ function 설치_전체() {
   ss.setSpreadsheetLocale('ko_KR');
   로그.push('시트: ' + ss.getUrl());
 
-  // 이미 설정된 관리자 이메일은 재설치해도 유지한다(탭을 비우기 전에 미리 읽어 둔다)
-  let 기존관리자메일 = '';
+  // 재설치해도 기존 설정값은 유지한다(탭을 비우기 전에 미리 읽어 둔다)
+  const 기존설정 = {};
   const 설정탭기존 = ss.getSheetByName('설정');
-  if (설정탭기존) {
-    const 기존값 = 설정탭기존.getDataRange().getValues();
-    for (let i = 1; i < 기존값.length; i++) {
-      if (String(기존값[i][0]).trim() === '관리자이메일' && String(기존값[i][1]).trim()) {
-        기존관리자메일 = String(기존값[i][1]).trim();
-      }
-    }
+  if (설정탭기존 && 설정탭기존.getLastRow() > 1) {
+    설정탭기존.getRange(2, 1, 설정탭기존.getLastRow() - 1, 2).getValues().forEach((r) => {
+      const k = String(r[0]).trim();
+      if (k) 기존설정[k] = r[1];
+    });
   }
+  const 기존관리자메일 = String(기존설정['관리자이메일'] || '').trim();
 
   // 1) 탭 준비 — 재실행해도 안전하게: 없는 탭만 만들고, 기본 시트(Sheet1)는 재활용
   const 탭이름들 = Object.keys(탭정의);
@@ -86,8 +85,15 @@ function 설치_전체() {
   });
   탭이름들.forEach((이름) => {
     const sh = ss.getSheetByName(이름);
-    sh.clear();
-    sh.getRange(1, 1, 1, 탭정의[이름].length).setValues([탭정의[이름]]).setFontWeight('bold');
+    const 정의 = 탭정의[이름];
+    const 현재 = sh.getLastColumn() > 0 ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String) : [];
+    const 헤더같음 = 정의.every((v, i) => 현재[i] === v);
+
+    // 헤더가 다를 때만 비운다. 같을 때도 비우면 재설치 때 이상이력·일일집계·주간요약이 사라진다.
+    if (!헤더같음) {
+      sh.clear();
+      sh.getRange(1, 1, 1, 정의.length).setValues([정의]).setFontWeight('bold');
+    }
     sh.setFrozenRows(1);
   });
 
@@ -155,8 +161,13 @@ function 설치_전체() {
   }
 
   // 4) 데이터 채우기 ------------------------------------------
+  // 사용자가 임계값을 고쳤을 수 있으므로 비어 있을 때만 기본값을 채운다
   const 기준시트 = ss.getSheetByName('기준값');
-  기준시트.getRange(2, 1, 기준값데이터.length, 8).setValues(기준값데이터);
+  if (기준시트.getLastRow() <= 1) {
+    기준시트.getRange(2, 1, 기준값데이터.length, 8).setValues(기준값데이터);
+  } else {
+    로그.push('기준값: 기존 값 유지 (' + (기준시트.getLastRow() - 1) + '행)');
+  }
 
   const 설비명 = { AC: '공기압축기', PU: '펌프', TK: '탱크', BL: '송풍기' };
   const 설비행 = 설비태그.map((t) => {
@@ -164,7 +175,8 @@ function 설치_전체() {
     const 이상 = 접두 === 'TK' ? 'ops@example.com' : 접두 === 'BL' ? 'safety@example.com' : 'mech@example.com';
     return [t, 설비명[접두] + ' ' + t.split('-')[1], 접두 === 'TK' ? '탱크구역' : '유틸리티동', '담당자' + t.split('-')[1], 이상];
   });
-  ss.getSheetByName('설비목록').getRange(2, 1, 설비행.length, 5).setValues(설비행);
+  const 설비시트 = ss.getSheetByName('설비목록');
+  if (설비시트.getLastRow() <= 1) 설비시트.getRange(2, 1, 설비행.length, 5).setValues(설비행);
 
   let 내메일 = 기존관리자메일;
   if (내메일) {
@@ -178,12 +190,16 @@ function 설치_전체() {
   const 폴더검색 = DriveApp.getFoldersByName('점검시스템_포트폴리오');
   const 폴더 = 폴더검색.hasNext() ? 폴더검색.next() : DriveApp.createFolder('점검시스템_포트폴리오');
 
-  ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
-    ['관리자이메일', 내메일],
-    ['알림활성화', 'TRUE'],
-    ['메일테스트모드', 'TRUE'],
-    ['PDF폴더ID', 폴더.getId()],
-  ]);
+  if (기존설정['알림활성화'] === undefined) 기존설정['알림활성화'] = 'TRUE';
+  if (기존설정['메일테스트모드'] === undefined) 기존설정['메일테스트모드'] = 'TRUE';
+  기존설정['관리자이메일'] = 내메일;
+  기존설정['PDF폴더ID'] = 폴더.getId();
+
+  const 설정시트2 = ss.getSheetByName('설정');
+  설정시트2.clear();
+  설정시트2.getRange(1, 1, 1, 2).setValues([['키', '값']]).setFontWeight('bold');
+  const 설정행 = Object.keys(기존설정).map((k) => [k, 기존설정[k]]);
+  설정시트2.getRange(2, 1, 설정행.length, 2).setValues(설정행);
   로그.push('PDF 저장 폴더: ' + 폴더.getUrl());
 
   // 6) 트리거 -------------------------------------------------
