@@ -78,6 +78,18 @@ function 설치_전체() {
   ss.setSpreadsheetLocale('ko_KR');
   로그.push('시트: ' + ss.getUrl());
 
+  // 이미 설정된 관리자 이메일은 재설치해도 유지한다(탭을 비우기 전에 미리 읽어 둔다)
+  let 기존관리자메일 = '';
+  const 설정탭기존 = ss.getSheetByName('설정');
+  if (설정탭기존) {
+    const 기존값 = 설정탭기존.getDataRange().getValues();
+    for (let i = 1; i < 기존값.length; i++) {
+      if (String(기존값[i][0]).trim() === '관리자이메일' && String(기존값[i][1]).trim()) {
+        기존관리자메일 = String(기존값[i][1]).trim();
+      }
+    }
+  }
+
   // 1) 탭 준비 — 재실행해도 안전하게: 없는 탭만 만들고, 기본 시트(Sheet1)는 재활용
   const 탭이름들 = Object.keys(탭정의);
   const 우리탭전체 = 탭이름들.concat(['원본응답']);
@@ -169,10 +181,14 @@ function 설치_전체() {
   });
   ss.getSheetByName('설비목록').getRange(2, 1, 설비행.length, 5).setValues(설비행);
 
-  let 내메일 = '';
-  try { 내메일 = Session.getActiveUser().getEmail(); } catch (e) {}
-  if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
-  if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 설정 탭 관리자이메일에 직접 입력하세요.');
+  let 내메일 = 기존관리자메일;
+  if (내메일) {
+    로그.push('관리자 이메일: 기존 값 유지 (' + 내메일 + ')');
+  } else {
+    try { 내메일 = Session.getActiveUser().getEmail(); } catch (e) {}
+    if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
+  }
+  if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 시트 상단 [점검시스템] → 알림 메일 주소 바꾸기 로 설정하세요.');
   ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
