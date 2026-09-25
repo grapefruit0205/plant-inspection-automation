@@ -658,16 +658,17 @@ function 설치_전체() {
   ss.setSpreadsheetLocale('ko_KR');
   로그.push('시트: ' + ss.getUrl());
 
-  // 1) 탭 준비 -------------------------------------------------
-  const 기본탭 = ss.getSheets()[0];
-  Object.keys(탭정의).forEach((이름, i) => {
-    let sh;
-    if (i === 0) {
-      sh = 기본탭;
-      sh.setName(이름);
-    } else {
-      sh = ss.getSheetByName(이름) || ss.insertSheet(이름);
-    }
+  // 1) 탭 준비 — 재실행해도 안전하게: 없는 탭만 만들고, 기본 시트(Sheet1)는 재활용
+  const 탭이름들 = Object.keys(탭정의);
+  const 우리탭전체 = 탭이름들.concat(['원본응답']);
+  탭이름들.forEach((이름) => {
+    if (ss.getSheetByName(이름)) return;
+    const 재활용 = ss.getSheets().filter((s) => 우리탭전체.indexOf(s.getName()) === -1)[0];
+    if (재활용) 재활용.setName(이름);
+    else ss.insertSheet(이름);
+  });
+  탭이름들.forEach((이름) => {
+    const sh = ss.getSheetByName(이름);
     sh.clear();
     sh.getRange(1, 1, 1, 탭정의[이름].length).setValues([탭정의[이름]]).setFontWeight('bold');
     sh.setFrozenRows(1);

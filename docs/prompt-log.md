@@ -34,6 +34,7 @@
 | `TypeError: Cannot read properties of undefined (reading 'namedValues')` | 편집기에서 `onFormSubmit`을 직접 실행하면 `e`가 없음 | 반드시 폼 제출로 테스트하거나 `테스트_판정()` 사용 |
 | `Exception: Specified permissions are not sufficient to call Session.getActiveUser. Required permissions: .../userinfo.email` | `appsscript.json` 매니페스트에 권한을 직접 나열했는데 `userinfo.email` 이 빠져 있었음 | 스코프 추가. 게다가 권한이 없어도 설치가 중단되지 않도록 `try/catch` 폴백을 넣어 실패 지점을 없앰 |
 | 재실행 시 "응답 탭을 찾지 못했습니다" | 첫 실행에서 이미 `원본응답` 으로 이름이 바뀌어 있어, 남은 탭을 찾는 방식이 통하지 않음 | 이름으로 먼저 찾고, 이미 있는 판정 열은 중복 추가하지 않게 수정 |
+| `Exception: A sheet with the name "기준값" already exists.` | 첫 시트를 무조건 `setName` 하던 코드가, 이미 그 이름이 있는 상태에서 재실행되며 충돌 | "없는 탭만 만들기" 방식으로 변경. 기본 시트(`Sheet1`)는 재활용하고, 이름이 같으면 건드리지 않음 |
 
 ## AI에게 맡긴 것 vs 내가 한 것
 
