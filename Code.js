@@ -69,6 +69,18 @@ function _응답만들기(h, r) {
   return 응답;
 }
 
+/**
+ * 점검일 셀 값을 'yyyy-MM-dd' 문자열로 맞춘다.
+ * 시트가 날짜로 바꿔 저장하면 Date 객체가 되고, 문자열이면 '2026-09-14 08:23:41'
+ * 처럼 시각이 붙을 수 있어, 그대로 두면 날짜 비교('2026-09-14' <= d)가 어긋난다.
+ */
+function _날짜문자열(raw) {
+  if (raw === null || raw === undefined) return '';
+  if (Object.prototype.toString.call(raw) === '[object Date]') return _날짜(raw);
+  const s = String(raw).trim();
+  return s.length > 10 ? s.slice(0, 10) : s;
+}
+
 function 설정(key) {
   const v = _시트(SH.설정).getDataRange().getValues();
   for (let i = 1; i < v.length; i++) {
@@ -356,15 +368,10 @@ function 주간요약갱신(시작일) {
   const 설비열 = h.indexOf('설비');
 
   let 총제출 = 0;
-  const 설비카운트 = {};
   v.forEach((r) => {
     if (!r[ts]) return;
     const d = _날짜(new Date(r[ts]));
-    if (d >= 시작 && d <= 종료) {
-      총제출++;
-      const s = String(r[설비열]);
-      설비카운트[s] = (설비카운트[s] || 0) + 1;
-    }
+    if (d >= 시작 && d <= 종료) 총제출++;
   });
 
   const ih = _시트(SH.이력).getDataRange().getValues();
@@ -377,12 +384,16 @@ function 주간요약갱신(시작일) {
   let 이상건수 = 0;
   let 미조치 = 0;
   const 항목카운트 = {};
+  // TOP3 설비는 제출 횟수가 아니라 '이상이 난 횟수' 기준이어야 의미가 있다
+  const 설비카운트 = {};
   ih.forEach((r) => {
-    const d = String(r[e일]);
+    const d = _날짜문자열(r[e일]);
     if (d >= 시작 && d <= 종료) {
       이상건수++;
       const a = String(r[e항목]);
       항목카운트[a] = (항목카운트[a] || 0) + 1;
+      const sf = String(r[e설비]);
+      설비카운트[sf] = (설비카운트[sf] || 0) + 1;
       if (String(r[e조치] || '').trim() !== '완료') 미조치++;
     }
   });
@@ -475,8 +486,7 @@ function _이상상세(시작일, 종료일) {
   const 목록 = [];
   v.forEach((r) => {
     // 시트가 날짜 문자열을 날짜형으로 바꿔 저장했을 수도 있어 둘 다 받는다
-    const raw = r[열.점검일];
-    const d = Object.prototype.toString.call(raw) === '[object Date]' ? _날짜(raw) : String(raw).trim();
+    const d = _날짜문자열(r[열.점검일]);
     if (!d || d < 시작일 || d > 종료일) return;
     목록.push({
       점검일: d,
@@ -900,6 +910,35 @@ function 진단_메일보내기() {
   );
   Logger.log('발송 완료 → ' + 관리자 + '  (받은편지함과 스팸함을 함께 확인하세요)');
   return 관리자;
+}
+
+/** 주간 집계가 왜 0건으로 나오는지 확인하기 위한 진단 */
+function 진단_주간집계() {
+  const ih = _시트(SH.이력).getDataRange().getValues();
+  const h = ih.shift().map(String);
+  const e일 = h.indexOf('점검일');
+  Logger.log('이상이력 ' + ih.length + '행 / "점검일" 열 위치: ' + e일 + ' / 헤더: ' + JSON.stringify(h));
+
+  const 종류 = {};
+  const 정규화 = [];
+  ih.forEach((r) => {
+    const raw = r[e일];
+    const t = Object.prototype.toString.call(raw);
+    종류[t] = (종류[t] || 0) + 1;
+    정규화.push(_날짜문자열(raw));
+  });
+  Logger.log('점검일 값 종류: ' + JSON.stringify(종류));
+  Logger.log('앞 3개 원본: ' + JSON.stringify(ih.slice(0, 3).map((r) => String(r[e일]))));
+
+  정규화.sort();
+  Logger.log('정규화 범위: "' + 정규화[0] + '" ~ "' + 정규화[정규화.length - 1] + '"');
+
+  const 시작 = _날짜(지난주월요일());
+  const 종료 = _날짜(new Date(지난주월요일().getTime() + 6 * 86400000));
+  Logger.log('지난주 ' + 시작 + ' ~ ' + 종료 + ' : ' + 정규화.filter((d) => d >= 시작 && d <= 종료).length + '건');
+
+  const 주 = _시트(SH.주간).getDataRange().getValues();
+  Logger.log('주간요약 ' + (주.length - 1) + '행 / 마지막 행: ' + JSON.stringify(주[주.length - 1].slice(0, 9)));
 }
 
 /** 원본응답 판정결과 열 색 규칙 — 이상=빨강, 정상=초록, 이상항목수>0=굵게 */
