@@ -579,3 +579,67 @@ function 전체재판정() {
   if (판정열.length) sh.getRange(2, nCol, 판정열.length, 2).setValues(판정열);
   Logger.log('재판정 완료: ' + v.length + '행 중 이상 ' + 건수 + '행');
 }
+
+/* ============================ 8. 시트 메뉴 ============================ */
+
+/**
+ * 시트를 열면 상단에 [점검시스템] 메뉴를 만든다.
+ * 편집기 실행은 입력창(getUi)을 못 띄우는 문맥이 있어, 시트에서 바로 실행할 수 있게 한다.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('점검시스템')
+    .addItem('알림 메일 주소 바꾸기', '설정_관리자메일바꾸기')
+    .addItem('주간 PDF 보고서 만들기', '메뉴_주간PDF')
+    .addSeparator()
+    .addItem('판정 로직 테스트', '테스트_판정')
+    .addItem('이상이력 전체 재판정', '전체재판정')
+    .addToUi();
+}
+
+/** 알림 메일 받을 주소를 입력창으로 바꾼다 */
+function 설정_관리자메일바꾸기() {
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (e) {
+    const 안내 = '이 실행 문맥에서는 입력창을 띄울 수 없습니다. 시트를 새로고침(F5)한 뒤 상단 [점검시스템] 메뉴에서 실행하세요.';
+    Logger.log(안내);
+    throw new Error(안내);
+  }
+
+  const 지금 = String(설정('관리자이메일') || '');
+  const 응답 = ui.prompt(
+    '알림 메일 받을 주소',
+    '현재: ' + (지금 || '(없음)') + '\n\n새 주소를 입력하고 확인을 누르세요.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (응답.getSelectedButton() !== ui.Button.OK) return '취소됨';
+
+  const 메일 = 응답.getResponseText().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(메일)) {
+    ui.alert('이메일 형식이 아닙니다: ' + 메일);
+    return '형식 오류';
+  }
+
+  const sh = _시트(SH.설정);
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim() === '관리자이메일') {
+      sh.getRange(i + 1, 2).setValue(메일);
+      Logger.log('관리자이메일 = ' + 메일);
+      ui.alert('저장했습니다.\n\n알림 메일 주소: ' + 메일);
+      return 메일;
+    }
+  }
+  throw new Error('설정 탭에 관리자이메일 키가 없습니다. 설치_전체를 먼저 실행하세요.');
+}
+
+function 메뉴_주간PDF() {
+  let ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+  const url = 주간PDF생성();
+  if (ui) ui.alert('주간 보고서를 만들었습니다.\n\n' + url);
+  else Logger.log('주간 보고서: ' + url);
+  return url;
+}

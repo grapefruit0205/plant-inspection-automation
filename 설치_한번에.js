@@ -6,7 +6,8 @@
  *   2) 확장 프로그램 → Apps Script → 기본 Code.gs 내용을 전부 지우고 이 파일 전체를 붙여넣기
  *   3) 저장(Ctrl+S) → 함수 선택에서 '설치_전체' 선택 → 실행 → 권한 허용
  *   4) (선택) '설치_샘플데이터' 실행 → 4주치 합성 데이터 생성
- *   5) (선택) '설정_관리자메일바꾸기' 실행 → 알림 메일 받을 주소 변경
+ *
+ * 이후에는 시트 상단 [점검시스템] 메뉴에서 실행합니다.
  *
  * 데이터 고지: 전부 합성 데이터입니다. 실제 회사 자료를 쓰지 않았습니다.
  */
@@ -595,6 +596,70 @@ function 전체재판정() {
   if (판정열.length) sh.getRange(2, nCol, 판정열.length, 2).setValues(판정열);
   Logger.log('재판정 완료: ' + v.length + '행 중 이상 ' + 건수 + '행');
 }
+
+/* ============================ 8. 시트 메뉴 ============================ */
+
+/**
+ * 시트를 열면 상단에 [점검시스템] 메뉴를 만든다.
+ * 편집기 실행은 입력창(getUi)을 못 띄우는 문맥이 있어, 시트에서 바로 실행할 수 있게 한다.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('점검시스템')
+    .addItem('알림 메일 주소 바꾸기', '설정_관리자메일바꾸기')
+    .addItem('주간 PDF 보고서 만들기', '메뉴_주간PDF')
+    .addSeparator()
+    .addItem('판정 로직 테스트', '테스트_판정')
+    .addItem('이상이력 전체 재판정', '전체재판정')
+    .addToUi();
+}
+
+/** 알림 메일 받을 주소를 입력창으로 바꾼다 */
+function 설정_관리자메일바꾸기() {
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (e) {
+    const 안내 = '이 실행 문맥에서는 입력창을 띄울 수 없습니다. 시트를 새로고침(F5)한 뒤 상단 [점검시스템] 메뉴에서 실행하세요.';
+    Logger.log(안내);
+    throw new Error(안내);
+  }
+
+  const 지금 = String(설정('관리자이메일') || '');
+  const 응답 = ui.prompt(
+    '알림 메일 받을 주소',
+    '현재: ' + (지금 || '(없음)') + '\n\n새 주소를 입력하고 확인을 누르세요.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (응답.getSelectedButton() !== ui.Button.OK) return '취소됨';
+
+  const 메일 = 응답.getResponseText().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(메일)) {
+    ui.alert('이메일 형식이 아닙니다: ' + 메일);
+    return '형식 오류';
+  }
+
+  const sh = _시트(SH.설정);
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim() === '관리자이메일') {
+      sh.getRange(i + 1, 2).setValue(메일);
+      Logger.log('관리자이메일 = ' + 메일);
+      ui.alert('저장했습니다.\n\n알림 메일 주소: ' + 메일);
+      return 메일;
+    }
+  }
+  throw new Error('설정 탭에 관리자이메일 키가 없습니다. 설치_전체를 먼저 실행하세요.');
+}
+
+function 메뉴_주간PDF() {
+  let ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+  const url = 주간PDF생성();
+  if (ui) ui.alert('주간 보고서를 만들었습니다.\n\n' + url);
+  else Logger.log('주간 보고서: ' + url);
+  return url;
+}
 /* ============================================================
  *  2부 — 자동 설치 (폼·시트·기준값·템플릿·트리거 생성)
  * ============================================================ */
@@ -846,41 +911,6 @@ function 설치_샘플데이터() {
   const n = _시트(SH.이력).getLastRow() - 1;
   Logger.log('샘플 데이터 생성 완료. 이상이력 ' + n + '건 / 일일집계 28일 / 주간요약 ' + (_시트(SH.주간).getLastRow() - 1) + '주.');
   return '이상이력 ' + n + '건';
-}
-
-/* ============================ 관리자 메일 주소 변경 ============================ */
-
-/**
- * 설정 탭의 관리자이메일 값을 입력창으로 바꾼다.
- * 알림 메일을 받을 주소를 셀을 찾아 들어가지 않고 바꿀 수 있게 하기 위한 것.
- */
-function 설정_관리자메일바꾸기() {
-  const ui = SpreadsheetApp.getUi();
-  const 지금 = String(설정('관리자이메일') || '');
-  const 응답 = ui.prompt(
-    '알림 메일 받을 주소',
-    '현재: ' + (지금 || '(없음)') + '\n\n새 주소를 입력하고 확인을 누르세요.',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (응답.getSelectedButton() !== ui.Button.OK) return '취소됨';
-
-  const 메일 = 응답.getResponseText().trim();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(메일)) {
-    ui.alert('이메일 형식이 아닙니다: ' + 메일);
-    return '형식 오류';
-  }
-
-  const sh = _시트(SH.설정);
-  const v = sh.getDataRange().getValues();
-  for (let i = 1; i < v.length; i++) {
-    if (String(v[i][0]).trim() === '관리자이메일') {
-      sh.getRange(i + 1, 2).setValue(메일);
-      Logger.log('관리자이메일 = ' + 메일 + '  (메일테스트모드 = ' + 설정('메일테스트모드') + ')');
-      ui.alert('저장했습니다.\n\n관리자이메일 = ' + 메일);
-      return 메일;
-    }
-  }
-  throw new Error('설정 탭에 관리자이메일 키가 없습니다. 설치_전체를 먼저 실행하세요.');
 }
 
 /* ============================ 설치 상태 점검 ============================ */
