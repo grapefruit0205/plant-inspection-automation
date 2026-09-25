@@ -68,30 +68,6 @@ function _숫자검증(최소, 최대, 안내) {
   return b.build();
 }
 
-/** 원본응답 판정결과 열 색 규칙 — 이상=빨강, 정상=초록, 이상항목수>0=굵게 */
-function _판정색규칙(응답탭) {
-  const h = 응답탭.getRange(1, 1, 1, 응답탭.getLastColumn()).getValues()[0].map(String);
-  const n = h.indexOf('판정결과') + 1;
-  const m = h.indexOf('이상항목수') + 1;
-  if (!n) return;
-  const 행수 = Math.max(응답탭.getMaxRows() - 1, 1);
-  const 판정범위 = 응답탭.getRange(2, n, 행수, 1);
-  const 규칙 = [
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('이상')
-      .setBackground('#f4cccc').setFontColor('#990000').setRanges([판정범위]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('정상')
-      .setBackground('#d9ead3').setFontColor('#274e13').setRanges([판정범위]).build(),
-  ];
-  if (m) {
-    규칙.push(
-      SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0)
-        .setBold(true).setBackground('#fce5cd')
-        .setRanges([응답탭.getRange(2, m, 행수, 1)]).build()
-    );
-  }
-  응답탭.setConditionalFormatRules(규칙);
-}
-
 /* ============================ 전체 설치 ============================ */
 
 function 설치_전체() {
@@ -122,30 +98,41 @@ function 설치_전체() {
   let form = null;
   const 기존 = DriveApp.getFilesByName('유틸리티동 일일 설비 점검표');
   if (기존.hasNext()) {
-    const id = 기존.next().getId();
-    form = FormApp.openById(id);
-    form.getItems().forEach((it) => form.deleteItem(it));
+    form = FormApp.openById(기존.next().getId());
     form.setTitle('유틸리티동 일일 설비 점검표').setDescription('설비 1대당 1회 제출. 숫자는 게이지 표시값 그대로 입력.');
   } else {
     form = FormApp.create('유틸리티동 일일 설비 점검표');
     form.setDescription('설비 1대당 1회 제출. 숫자는 게이지 표시값 그대로 입력.');
   }
 
-  form.addListItem().setTitle('점검자').setChoiceValues(점검자목록).setRequired(true);
-  form.addListItem().setTitle('설비').setChoiceValues(설비태그).setRequired(true);
-  form.addTextItem().setTitle('압축기 토출 압력(bar)').setRequired(true)
-    .setValidation(_숫자검증(0, 15, '0~15 사이 숫자로 입력하세요.'));
-  form.addMultipleChoiceItem().setTitle('오일 레벨').setChoiceValues(['정상', '보충필요']).setRequired(true);
-  form.addMultipleChoiceItem().setTitle('펌프 진동·소음').setChoiceValues(['정상', '주의', '이상']).setRequired(true);
-  form.addTextItem().setTitle('베어링 온도(℃)').setRequired(true)
-    .setValidation(_숫자검증(0, 150, '0~150 사이 숫자로 입력하세요.'));
-  form.addTextItem().setTitle('탱크 액위(%)').setRequired(true)
-    .setValidation(_숫자검증(0, 100, '0~100 사이 숫자로 입력하세요.'));
-  form.addMultipleChoiceItem().setTitle('배관 누설').setChoiceValues(['없음', '있음']).setRequired(true);
-  form.addMultipleChoiceItem().setTitle('밸브 잠금 상태').setChoiceValues(['정상', '해제됨']).setRequired(true);
-  form.addMultipleChoiceItem().setTitle('안전 커버·방호').setChoiceValues(['정상', '파손']).setRequired(true);
-  form.addMultipleChoiceItem().setTitle('윤활 급유').setChoiceValues(['완료', '미실시']).setRequired(true);
-  form.addParagraphTextItem().setTitle('특이사항').setRequired(false);
+  // 문항이 이미 있으면 다시 만들지 않는다.
+  // 폼 문항을 다시 만들면 연결된 시트에 같은 이름의 열이 새로 늘어나서
+  // 판정이 뒤쪽 빈 열을 읽게 되는 문제가 생긴다.
+  const 문항이있음 = form.getItems().length === 12;
+  if (문항이있음) {
+    로그.push('폼 문항이 이미 있어 그대로 사용합니다(중복 열 방지)');
+  } else {
+    form.getItems().forEach((it) => form.deleteItem(it));
+  }
+
+  if (!문항이있음) {
+    form.addListItem().setTitle('점검자').setChoiceValues(점검자목록).setRequired(true);
+    form.addListItem().setTitle('설비').setChoiceValues(설비태그).setRequired(true);
+    form.addTextItem().setTitle('압축기 토출 압력(bar)').setRequired(true)
+      .setValidation(_숫자검증(0, 15, '0~15 사이 숫자로 입력하세요.'));
+    form.addMultipleChoiceItem().setTitle('오일 레벨').setChoiceValues(['정상', '보충필요']).setRequired(true);
+    form.addMultipleChoiceItem().setTitle('펌프 진동·소음').setChoiceValues(['정상', '주의', '이상']).setRequired(true);
+    form.addTextItem().setTitle('베어링 온도(℃)').setRequired(true)
+      .setValidation(_숫자검증(0, 150, '0~150 사이 숫자로 입력하세요.'));
+    form.addTextItem().setTitle('탱크 액위(%)').setRequired(true)
+      .setValidation(_숫자검증(0, 100, '0~100 사이 숫자로 입력하세요.'));
+    form.addMultipleChoiceItem().setTitle('배관 누설').setChoiceValues(['없음', '있음']).setRequired(true);
+    form.addMultipleChoiceItem().setTitle('밸브 잠금 상태').setChoiceValues(['정상', '해제됨']).setRequired(true);
+    form.addMultipleChoiceItem().setTitle('안전 커버·방호').setChoiceValues(['정상', '파손']).setRequired(true);
+    form.addMultipleChoiceItem().setTitle('윤활 급유').setChoiceValues(['완료', '미실시']).setRequired(true);
+    form.addParagraphTextItem().setTitle('특이사항').setRequired(false);
+  }
+
 
   if (form.getDestinationId() !== ss.getId()) {
     form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());

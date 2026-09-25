@@ -33,6 +33,7 @@
 |---|---|---|
 | `TypeError: Cannot read properties of undefined (reading 'namedValues')` | 편집기에서 `onFormSubmit`을 직접 실행하면 `e`가 없음 | 반드시 폼 제출로 테스트하거나 `테스트_판정()` 사용 |
 | `Exception: Specified permissions are not sufficient to call Session.getActiveUser. Required permissions: .../userinfo.email` | `appsscript.json` 매니페스트에 권한을 직접 나열했는데 `userinfo.email` 이 빠져 있었음 | 스코프 추가. 게다가 권한이 없어도 설치가 중단되지 않도록 `try/catch` 폴백을 넣어 실패 지점을 없앰 |
+| 폼을 제출해도 항상 "정상" 판정, 알림 메일이 한 통도 안 옴 | 설치를 여러 번 하면서 폼 문항을 매번 지웠다 다시 만들었고, 그때마다 연결된 시트에 **같은 문항 열이 새로 늘어남**. 헤더가 4번 중복되자 코드가 뒤쪽 빈 열을 읽어 판정이 0건이 됐음 | ① 응답을 읽을 때 이름이 중복되면 **비어 있지 않은 첫 열**을 쓰도록 통일 ② 트리거도 이벤트 값(`namedValues`) 대신 **시트에 기록된 그 행을 직접 읽도록** 변경 ③ 설치 시 문항이 이미 있으면 다시 만들지 않게 수정 ④ `정리_중복열()` 추가 |
 | 재실행 시 "응답 탭을 찾지 못했습니다" | 첫 실행에서 이미 `원본응답` 으로 이름이 바뀌어 있어, 남은 탭을 찾는 방식이 통하지 않음 | 이름으로 먼저 찾고, 이미 있는 판정 열은 중복 추가하지 않게 수정 |
 | `Exception: A sheet with the name "기준값" already exists.` | 첫 시트를 무조건 `setName` 하던 코드가, 이미 그 이름이 있는 상태에서 재실행되며 충돌 | "없는 탭만 만들기" 방식으로 변경. 기본 시트(`Sheet1`)는 재활용하고, 이름이 같으면 건드리지 않음 |
 

@@ -52,6 +52,23 @@ function _타임스탬프열(h) {
   return j === -1 ? 0 : j;
 }
 
+/**
+ * 응답 한 행을 헤더 이름으로 읽는다.
+ * 폼 문항을 다시 만들면 같은 문항 열이 시트에 새로 추가될 수 있어(이름 중복),
+ * 그때 비어 있지 않은 첫 값을 쓴다. 이 처리가 없으면 뒤쪽 빈 열을 읽어
+ * 항상 "정상" 으로 판정된다.
+ */
+function _응답만들기(h, r) {
+  const 응답 = {};
+  h.forEach((name, j) => {
+    const v = r[j];
+    const 값있음 = v !== '' && v !== null && v !== undefined;
+    if (!(name in 응답)) 응답[name] = 값있음 ? v : '';
+    else if (값있음 && String(응답[name]).trim() === '') 응답[name] = v;
+  });
+  return 응답;
+}
+
 function 설정(key) {
   const v = _시트(SH.설정).getDataRange().getValues();
   for (let i = 1; i < v.length; i++) {
@@ -232,11 +249,18 @@ function 메일알림(응답, 이상목록, 기준일) {
 /* ============================ 5. 폼 제출 진입점 ============================ */
 
 function onFormSubmit(e) {
-  if (!e || !e.namedValues) {
+  if (!e || !e.range) {
     throw new Error('이 함수는 폼 제출로만 실행됩니다. 편집기에서 테스트하려면 테스트_판정()을 쓰세요.');
   }
-  const 응답 = {};
-  Object.keys(e.namedValues).forEach((k) => (응답[k] = e.namedValues[k][0]));
+
+  // 이벤트의 namedValues 대신 시트에 기록된 그 행을 직접 읽는다.
+  // 폼 문항을 다시 만들면 같은 이름의 열이 늘어날 수 있고, 그때 이벤트 값은
+  // 뒤쪽 빈 열에 가려질 수 있어서다. 행을 직접 읽으면 항상 실제 값이 잡힌다.
+  const sh = _시트(SH.원본);
+  const 행 = e.range.getRow();
+  const h = _헤더(sh);
+  const r = sh.getRange(행, 1, 1, h.length).getValues()[0];
+  const 응답 = _응답만들기(h, r);
 
   const 기준목록 = 기준값읽기();
   const 이상목록 = 이상치판정(응답, 기준목록);
@@ -245,8 +269,9 @@ function onFormSubmit(e) {
     이상이력기록(응답, 이상목록, new Date());
     메일알림(응답, 이상목록, new Date());
   }
-  원본응답판정기록(e.range.getRow(), 이상목록);
+  원본응답판정기록(행, 이상목록);
   일일집계갱신(new Date());
+  Logger.log(행 + '행 판정: ' + (이상목록.length ? '이상 ' + 이상목록.length + '건' : '정상'));
 }
 
 /** 원본응답 탭 N열(판정결과), O열(이상항목수) 기입 */
@@ -573,8 +598,7 @@ function 전체재판정() {
   const 판정열 = [];
   let 건수 = 0;
   v.forEach((r, i) => {
-    const 응답 = {};
-    h.forEach((name, j) => (응답[name] = r[j]));
+    const 응답 = _응답만들기(h, r);
     const 이상목록 = 이상치판정(응답, 기준목록);
     판정열.push([이상목록.length ? '이상' : '정상', 이상목록.length]);
     if (이상목록.length) {
@@ -602,6 +626,7 @@ function onOpen() {
     .addSeparator()
     .addItem('판정 로직 테스트', '테스트_판정')
     .addItem('이상이력 전체 재판정', '전체재판정')
+    .addItem('중복 열 정리', '메뉴_중복열정리')
     .addToUi();
 }
 
@@ -669,6 +694,58 @@ function 진단_메일보내기() {
   return 관리자;
 }
 
+/** 원본응답 판정결과 열 색 규칙 — 이상=빨강, 정상=초록, 이상항목수>0=굵게 */
+function _판정색규칙(응답탭) {
+  const h = 응답탭.getRange(1, 1, 1, 응답탭.getLastColumn()).getValues()[0].map(String);
+  const n = h.indexOf('판정결과') + 1;
+  const m = h.indexOf('이상항목수') + 1;
+  if (!n) return;
+  const 행수 = Math.max(응답탭.getMaxRows() - 1, 1);
+  const 판정범위 = 응답탭.getRange(2, n, 행수, 1);
+  const 규칙 = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('이상')
+      .setBackground('#f4cccc').setFontColor('#990000').setRanges([판정범위]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('정상')
+      .setBackground('#d9ead3').setFontColor('#274e13').setRanges([판정범위]).build(),
+  ];
+  if (m) {
+    규칙.push(
+      SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0)
+        .setBold(true).setBackground('#fce5cd')
+        .setRanges([응답탭.getRange(2, m, 행수, 1)]).build()
+    );
+  }
+  응답탭.setConditionalFormatRules(규칙);
+}
+
+/**
+ * 원본응답 탭에 같은 이름의 문항 열이 여러 번 늘어났을 때, 첫 번째 열만 남기고
+ * 뒤 중복 열을 지운다. (설치를 반복해 폼 문항이 다시 만들어질 때 생기는 문제)
+ */
+function 정리_중복열() {
+  const sh = _시트(SH.원본);
+  const h = _헤더(sh);
+  const 처음 = {};
+  const 삭제 = [];
+  h.forEach((name, i) => {
+    if (!name) return;
+    if (처음[name] === undefined) 처음[name] = i;
+    else 삭제.push(i);
+  });
+
+  if (!삭제.length) {
+    Logger.log('중복 열이 없습니다. 현재 ' + h.length + '열.');
+    return 0;
+  }
+
+  삭제.sort((a, b) => b - a).forEach((i) => sh.deleteColumn(i + 1));
+  _판정색규칙(sh);
+  const 후 = _헤더(sh);
+  Logger.log('중복 열 ' + 삭제.length + '개 삭제: ' + h.length + '열 → ' + 후.length + '열');
+  Logger.log('남은 헤더: ' + JSON.stringify(후));
+  return 삭제.length;
+}
+
 /**
  * 마지막 응답 1건을 기준값과 대조해, 왜 이상으로 잡히거나 안 잡히는지 보여준다.
  * 폼 제출 자동 판정이 안 될 때 원인을 찾기 위한 진단.
@@ -680,8 +757,7 @@ function 진단_마지막응답() {
   const r = v[v.length - 1];
   Logger.log('응답 데이터 ' + (v.length - 1) + '행 / 검사 대상은 마지막 행');
 
-  const 응답 = {};
-  h.forEach((name, j) => (응답[name] = r[j]));
+  const 응답 = _응답만들기(h, r);
 
   const 기준 = 기준값읽기();
   Logger.log('기준값 탭 컬럼명: ' + JSON.stringify(기준.map((k) => k.컬럼명)));
@@ -725,8 +801,7 @@ function 미판정행처리() {
   });
 
   처리할것.forEach(({ 행, 응답: r }) => {
-    const 응답 = {};
-    h.forEach((name, j) => (응답[name] = r[j]));
+    const 응답 = _응답만들기(h, r);
     const 시각 = new Date(r[ts열]);
     const 이상목록 = 이상치판정(응답, 기준목록);
     if (이상목록.length) {
@@ -741,6 +816,16 @@ function 미판정행처리() {
     Logger.log('미판정 행 ' + 처리할것.length + '건 처리·알림 완료');
   }
   return 처리할것.length;
+}
+
+function 메뉴_중복열정리() {
+  let ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+  const n = 정리_중복열();
+  const 말 = n ? '중복 열 ' + n + '개를 정리했습니다.' : '중복 열이 없습니다.';
+  if (ui) ui.alert(말);
+  else Logger.log(말);
+  return n;
 }
 
 function 메뉴_미판정처리() {
