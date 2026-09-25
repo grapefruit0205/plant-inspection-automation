@@ -10,6 +10,7 @@
  * 데이터 고지: 전부 합성 데이터입니다. 실제 회사 자료를 쓰지 않았습니다.
  */
 
+
 /* ============================================================
  *  1부 — 본체 (판정·알림·집계·PDF)
  * ============================================================ */
@@ -701,21 +702,26 @@ function 설치_전체() {
   form.addMultipleChoiceItem().setTitle('윤활 급유').setChoiceValues(['완료', '미실시']).setRequired(true);
   form.addParagraphTextItem().setTitle('특이사항').setRequired(false);
 
-  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+  if (form.getDestinationId() !== ss.getId()) {
+    form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+  }
   로그.push('폼: ' + form.getPublishedUrl());
   로그.push('폼 편집: ' + form.getEditUrl());
 
   // 3) 응답 탭 이름 정리 --------------------------------------
   const 우리탭 = Object.keys(탭정의).concat(['원본응답']);
-  const 응답탭 = ss.getSheets().filter((s) => 우리탭.indexOf(s.getName()) === -1)[0];
+  let 응답탭 = ss.getSheets().filter((s) => 우리탭.indexOf(s.getName()) === -1)[0];
+  if (!응답탭) 응답탭 = ss.getSheetByName('원본응답');   // 두 번째 실행부터는 이름으로 찾음
   if (응답탭) {
     응답탭.setName('원본응답');
-    const h = 응답탭.getRange(1, 1, 1, 응답탭.getLastColumn()).getValues()[0];
-    응답탭.getRange(1, h.length + 1, 1, 2).setValues([['판정결과', '이상항목수']]);
+    const h = 응답탭.getRange(1, 1, 1, Math.max(응답탭.getLastColumn(), 1)).getValues()[0];
+    if (h.indexOf('판정결과') === -1) {
+      응답탭.getRange(1, h.length + 1, 1, 2).setValues([['판정결과', '이상항목수']]);
+    }
     응답탭.setFrozenRows(1);
-    로그.push('응답 탭: 원본응답 (' + h.length + '열 + 판정결과/이상항목수)');
+    로그.push('응답 탭: 원본응답 (판정결과/이상항목수 포함)');
   } else {
-    로그.push('⚠️ 응답 탭을 찾지 못했습니다. 시트를 새로고침한 뒤 확인하세요.');
+    로그.push('⚠️ 응답 탭을 찾지 못했습니다. 폼 문항을 한 번 제출한 뒤 다시 실행하세요.');
   }
 
   // 4) 데이터 채우기 ------------------------------------------
@@ -730,7 +736,10 @@ function 설치_전체() {
   });
   ss.getSheetByName('설비목록').getRange(2, 1, 설비행.length, 5).setValues(설비행);
 
-  const 내메일 = Session.getActiveUser().getEmail();
+  let 내메일 = '';
+  try { 내메일 = Session.getActiveUser().getEmail(); } catch (e) {}
+  if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
+  if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 설정 탭 관리자이메일에 직접 입력하세요.');
   ss.getSheetByName('설정').getRange(2, 1, 3, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
