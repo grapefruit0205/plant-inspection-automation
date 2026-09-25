@@ -64,8 +64,6 @@
 
 ![주간보고 메일](docs/screenshots/04-weekly-mail.png)
 
-> 시연 영상(30초)은 `docs/demo.mp4` 로 추가 예정입니다.
-
 ## 5. 주요 기능
 
 | 기능 | 설명 |
