@@ -635,6 +635,32 @@ function 설정_관리자메일바꾸기() {
   throw new Error('설정 탭에 관리자이메일 키가 없습니다. 설치_전체를 먼저 실행하세요.');
 }
 
+/**
+ * 메일 발송 경로 진단. 설정값을 로그로 남기고 실제로 1통 보낸다.
+ * 메일이 안 올 때 어느 주소로 가는지, 발송이 막히는지 구분하기 위한 것.
+ */
+function 진단_메일보내기() {
+  const 관리자 = String(설정('관리자이메일') || '').trim();
+  const 테스트모드 = String(설정('메일테스트모드') || '').toUpperCase() === 'TRUE';
+  const 알림 = String(설정('알림활성화') || '').toUpperCase() === 'TRUE';
+
+  Logger.log('관리자이메일 = "' + 관리자 + '"');
+  Logger.log('메일테스트모드 = ' + 테스트모드 + ' / 알림활성화 = ' + 알림);
+  Logger.log('폼 제출 알림은 알림활성화가 TRUE 여야 발송됩니다.');
+
+  if (!관리자) {
+    throw new Error('관리자이메일이 비어 있습니다. 시트 상단 [점검시스템] → 알림 메일 주소 바꾸기 로 설정하세요.');
+  }
+
+  GmailApp.sendEmail(
+    관리자,
+    '[진단] 알림 메일 경로 테스트',
+    '이 메일이 보이면 발송 경로는 정상입니다.\n수신 주소: ' + 관리자 + '\n보낸 계정: ' + Session.getEffectiveUser().getEmail()
+  );
+  Logger.log('발송 완료 → ' + 관리자 + '  (받은편지함과 스팸함을 함께 확인하세요)');
+  return 관리자;
+}
+
 function 메뉴_주간PDF() {
   let ui;
   try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
