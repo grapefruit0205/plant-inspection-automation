@@ -737,30 +737,47 @@ function _판정색규칙(응답탭) {
 
 /**
  * 원본응답 탭에 같은 이름의 문항 열이 여러 번 늘어났을 때, 첫 번째 열만 남기고
- * 뒤 중복 열을 지운다. (설치를 반복해 폼 문항이 다시 만들어질 때 생기는 문제)
+ * 뒤 중복 열을 정리한다. (설치를 반복해 폼 문항이 다시 만들어질 때 생기는 문제)
+ *
+ * 폼이 관리하는 열은 구글이 삭제를 막으므로("Cannot delete column with form data"),
+ * 지울 수 있는 열은 지우고 나머지는 숨긴다. 숨겨도 값은 남아 있고,
+ * 코드는 중복 열에 안전하게 읽도록 되어 있다.
  */
 function 정리_중복열() {
   const sh = _시트(SH.원본);
   const h = _헤더(sh);
   const 처음 = {};
-  const 삭제 = [];
+  const 중복 = [];
   h.forEach((name, i) => {
     if (!name) return;
     if (처음[name] === undefined) 처음[name] = i;
-    else 삭제.push(i);
+    else 중복.push(i);
   });
 
-  if (!삭제.length) {
+  if (!중복.length) {
     Logger.log('중복 열이 없습니다. 현재 ' + h.length + '열.');
     return 0;
   }
 
-  삭제.sort((a, b) => b - a).forEach((i) => sh.deleteColumn(i + 1));
+  let 삭제 = 0;
+  let 숨김 = 0;
+  중복
+    .sort((a, b) => b - a) // 뒤에서부터 처리해야 앞 열 번호가 밀리지 않는다
+    .forEach((i) => {
+      try {
+        sh.deleteColumn(i + 1);
+        삭제++;
+      } catch (e) {
+        sh.hideColumns(i + 1);
+        숨김++;
+      }
+    });
+
   _판정색규칙(sh);
-  const 후 = _헤더(sh);
-  Logger.log('중복 열 ' + 삭제.length + '개 삭제: ' + h.length + '열 → ' + 후.length + '열');
-  Logger.log('남은 헤더: ' + JSON.stringify(후));
-  return 삭제.length;
+  Logger.log('중복 열 처리: 삭제 ' + 삭제 + '개, 숨김 ' + 숨김 + '개');
+  Logger.log('전체 ' + h.length + '열 (숨긴 열 포함). 화면에는 첫 문항 열과 판정 열만 보입니다.');
+  Logger.log('헤더: ' + JSON.stringify(_헤더(sh)));
+  return 삭제 + 숨김;
 }
 
 /**
@@ -839,7 +856,9 @@ function 메뉴_중복열정리() {
   let ui;
   try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
   const n = 정리_중복열();
-  const 말 = n ? '중복 열 ' + n + '개를 정리했습니다.' : '중복 열이 없습니다.';
+  const 말 = n
+    ? '중복 열 ' + n + '개를 정리했습니다.\n\n폼이 관리하는 열은 삭제할 수 없어 숨김 처리했습니다.\n값은 그대로 있고, 판정 코드는 중복 열에 안전하게 동작합니다.'
+    : '중복 열이 없습니다.';
   if (ui) ui.alert(말);
   else Logger.log(말);
   return n;
