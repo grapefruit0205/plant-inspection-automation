@@ -248,6 +248,41 @@ function 설치_샘플데이터() {
   return '이상이력 ' + n + '건';
 }
 
+/* ============================ 관리자 메일 주소 변경 ============================ */
+
+/**
+ * 설정 탭의 관리자이메일 값을 입력창으로 바꾼다.
+ * 알림 메일을 받을 주소를 셀을 찾아 들어가지 않고 바꿀 수 있게 하기 위한 것.
+ */
+function 설정_관리자메일바꾸기() {
+  const ui = SpreadsheetApp.getUi();
+  const 지금 = String(설정('관리자이메일') || '');
+  const 응답 = ui.prompt(
+    '알림 메일 받을 주소',
+    '현재: ' + (지금 || '(없음)') + '\n\n새 주소를 입력하고 확인을 누르세요.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (응답.getSelectedButton() !== ui.Button.OK) return '취소됨';
+
+  const 메일 = 응답.getResponseText().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(메일)) {
+    ui.alert('이메일 형식이 아닙니다: ' + 메일);
+    return '형식 오류';
+  }
+
+  const sh = _시트(SH.설정);
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim() === '관리자이메일') {
+      sh.getRange(i + 1, 2).setValue(메일);
+      Logger.log('관리자이메일 = ' + 메일 + '  (메일테스트모드 = ' + 설정('메일테스트모드') + ')');
+      ui.alert('저장했습니다.\n\n관리자이메일 = ' + 메일);
+      return 메일;
+    }
+  }
+  throw new Error('설정 탭에 관리자이메일 키가 없습니다. 설치_전체를 먼저 실행하세요.');
+}
+
 /* ============================ 설치 상태 점검 ============================ */
 
 function 설치_확인() {
