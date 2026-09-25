@@ -68,6 +68,30 @@ function _숫자검증(최소, 최대, 안내) {
   return b.build();
 }
 
+/** 원본응답 판정결과 열 색 규칙 — 이상=빨강, 정상=초록, 이상항목수>0=굵게 */
+function _판정색규칙(응답탭) {
+  const h = 응답탭.getRange(1, 1, 1, 응답탭.getLastColumn()).getValues()[0].map(String);
+  const n = h.indexOf('판정결과') + 1;
+  const m = h.indexOf('이상항목수') + 1;
+  if (!n) return;
+  const 행수 = Math.max(응답탭.getMaxRows() - 1, 1);
+  const 판정범위 = 응답탭.getRange(2, n, 행수, 1);
+  const 규칙 = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('이상')
+      .setBackground('#f4cccc').setFontColor('#990000').setRanges([판정범위]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('정상')
+      .setBackground('#d9ead3').setFontColor('#274e13').setRanges([판정범위]).build(),
+  ];
+  if (m) {
+    규칙.push(
+      SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0)
+        .setBold(true).setBackground('#fce5cd')
+        .setRanges([응답탭.getRange(2, m, 행수, 1)]).build()
+    );
+  }
+  응답탭.setConditionalFormatRules(규칙);
+}
+
 /* ============================ 전체 설치 ============================ */
 
 function 설치_전체() {
@@ -140,7 +164,8 @@ function 설치_전체() {
       응답탭.getRange(1, h.length + 1, 1, 2).setValues([['판정결과', '이상항목수']]);
     }
     응답탭.setFrozenRows(1);
-    로그.push('응답 탭: 원본응답 (판정결과/이상항목수 포함)');
+    _판정색규칙(응답탭);
+    로그.push('응답 탭: 원본응답 (판정결과/이상항목수 + 이상=빨강 색규칙)');
   } else {
     로그.push('⚠️ 응답 탭을 찾지 못했습니다. 폼 문항을 한 번 제출한 뒤 다시 실행하세요.');
   }
