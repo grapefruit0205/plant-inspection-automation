@@ -161,9 +161,10 @@ function 설치_전체() {
   try { 내메일 = Session.getActiveUser().getEmail(); } catch (e) {}
   if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
   if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 설정 탭 관리자이메일에 직접 입력하세요.');
-  ss.getSheetByName('설정').getRange(2, 1, 3, 2).setValues([
+  ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
+    ['메일테스트모드', 'TRUE'],
     ['템플릿문서ID', ''],
   ]);
 
@@ -208,8 +209,17 @@ function 설치_전체() {
 function 설치_샘플데이터() {
   _dev_가상데이터생성(28);
   전체재판정();
+
+  // 데모 시트가 바로 완성되게 일일집계(28일)·주간요약(4주)까지 채운다.
+  // (1~2분 걸릴 수 있습니다)
+  const 오늘 = _오늘0시_기준(new Date());
+  for (let d = 27; d >= 0; d--) 일일집계갱신(new Date(오늘.getTime() - d * 86400000));
+
+  const 이번주월요일 = new Date(오늘.getTime() - ((오늘.getDay() + 6) % 7) * 86400000);
+  for (let w = 3; w >= 0; w--) 주간요약갱신(new Date(이번주월요일.getTime() - w * 7 * 86400000));
+
   const n = _시트(SH.이력).getLastRow() - 1;
-  Logger.log('샘플 데이터 생성 완료. 이상이력 ' + n + '건.');
+  Logger.log('샘플 데이터 생성 완료. 이상이력 ' + n + '건 / 일일집계 28일 / 주간요약 ' + (_시트(SH.주간).getLastRow() - 1) + '주.');
   return '이상이력 ' + n + '건';
 }
 
@@ -227,6 +237,7 @@ function 설치_확인() {
     기준값행: _시트(SH.기준).getLastRow() - 1 + '행',
     설비수: _시트(SH.설비).getLastRow() - 1 + '대',
     관리자메일: String(설정('관리자이메일')),
+    메일테스트모드: String(설정('메일테스트모드')),
     템플릿ID: String(설정('템플릿문서ID')) ? '설정됨' : '비어 있음',
   };
   Logger.log(JSON.stringify(결과, null, 2));

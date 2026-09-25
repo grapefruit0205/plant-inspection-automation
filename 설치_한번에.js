@@ -57,6 +57,17 @@ function _열(sh, name) {
   return i + 1;
 }
 
+/**
+ * 타임스탬프 열 위치(0부터). 시트 로케일에 따라 머리글이 '타임스탬프'/'Timestamp' 로
+ * 갈리므로 둘 다 보고, 그래도 없으면 첫 열을 쓴다(폼 응답 시트는 첫 열이 제출 시각).
+ */
+function _타임스탬프열(h) {
+  const i = h.indexOf('타임스탬프');
+  if (i !== -1) return i;
+  const j = h.indexOf('Timestamp');
+  return j === -1 ? 0 : j;
+}
+
 function 설정(key) {
   const v = _시트(SH.설정).getDataRange().getValues();
   for (let i = 1; i < v.length; i++) {
@@ -191,10 +202,15 @@ function 메일알림(응답, 이상목록, 기준일) {
   if (!이상목록.length) return 0;
   if (String(설정('알림활성화')).toUpperCase() !== 'TRUE') return 0;
 
+  // 메일테스트모드: 부서 주소 대신 관리자에게만 보내고, 제목에 원래 수신자를 남긴다.
+  // (기준값 탭의 담당자 주소가 자리표시자일 때 데모·검증용)
+  const 테스트모드 = String(설정('메일테스트모드')).toUpperCase() === 'TRUE';
+  const 관리자 = String(설정('관리자이메일'));
+
   // 담당자별 묶음
   const 묶음 = {};
   이상목록.forEach((x) => {
-    const to = x.메일 || String(설정('관리자이메일'));
+    const to = x.메일 || 관리자;
     (묶음[to] = 묶음[to] || []).push(x);
   });
 
@@ -204,7 +220,10 @@ function 메일알림(응답, 이상목록, 기준일) {
 
   Object.keys(묶음).forEach((to) => {
     const 목록 = 묶음[to];
-    const 제목 = '[설비이상] ' + 설비 + ' ' + 목록[0].항목명 + (목록.length > 1 ? ' 외 ' + (목록.length - 1) + '건' : '');
+    const 받는사람 = 테스트모드 ? 관리자 : to;
+    if (!받는사람) return;   // 수신 주소를 못 읽으면 건너뜀
+    const 제목 = (테스트모드 ? '[테스트→' + to + '] ' : '') +
+      '[설비이상] ' + 설비 + ' ' + 목록[0].항목명 + (목록.length > 1 ? ' 외 ' + (목록.length - 1) + '건' : '');
     const 행 = 목록
       .map(
         (x) =>
@@ -219,7 +238,7 @@ function 메일알림(응답, 이상목록, 기준일) {
       행 +
       '</table><p>조치 후 이상이력 탭의 조치상태를 갱신해 주세요.</p>';
 
-    GmailApp.sendEmail(to, 제목, 제목, { htmlBody: 본문 });
+    GmailApp.sendEmail(받는사람, 제목, 제목, { htmlBody: 본문 });
     발송++;
   });
 
@@ -261,7 +280,7 @@ function 일일집계갱신(기준일) {
   const v = sh.getDataRange().getValues();
   const h = v.shift().map(String);
   const c = {
-    ts: h.indexOf('타임스탬프'),
+    ts: _타임스탬프열(h),
     설비: h.indexOf('설비'),
     판정: h.indexOf('판정결과'),
   };
@@ -324,7 +343,7 @@ function 주간요약갱신(시작일) {
 
   const v = _시트(SH.원본).getDataRange().getValues();
   const h = v.shift().map(String);
-  const ts = h.indexOf('타임스탬프');
+  const ts = _타임스탬프열(h);
   const 설비열 = h.indexOf('설비');
 
   let 총제출 = 0;
@@ -501,6 +520,7 @@ function _dev_가상데이터생성(일수) {
   const 일 = Number(일수 || 28);
   const sh = _시트(SH.원본);
   const h = _헤더(sh);
+  const ts열 = _타임스탬프열(h);
 
   const 설비 = _시트(SH.설비).getDataRange().getValues().slice(1)
     .map((r) => String(r[0])).filter(String);
@@ -524,7 +544,7 @@ function _dev_가상데이터생성(일수) {
 
       const 고르기 = (정상, 이상) => (이상함 && Math.random() < 0.35 ? 이상 : 정상);
       const 값 = {
-        '타임스탬프': Utilities.formatDate(new Date(base.getTime() + rnd(8 * 3600, 9.5 * 3600) * 1000), TZ, 'yyyy-MM-dd HH:mm:ss'),
+        [h[ts열]]: Utilities.formatDate(new Date(base.getTime() + rnd(8 * 3600, 9.5 * 3600) * 1000), TZ, 'yyyy-MM-dd HH:mm:ss'),
         '점검자': 점검자[(si + d) % 점검자.length],
         '설비': s,
         '압축기 토출 압력(bar)': 압력,
@@ -567,7 +587,7 @@ function 전체재판정() {
     const 이상목록 = 이상치판정(응답, 기준목록);
     판정열.push([이상목록.length ? '이상' : '정상', 이상목록.length]);
     if (이상목록.length) {
-      이상이력기록(응답, 이상목록, new Date(r[h.indexOf('타임스탬프')]));
+      이상이력기록(응답, 이상목록, new Date(r[_타임스탬프열(h)]));
       건수++;
     }
   });
@@ -741,9 +761,10 @@ function 설치_전체() {
   try { 내메일 = Session.getActiveUser().getEmail(); } catch (e) {}
   if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
   if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 설정 탭 관리자이메일에 직접 입력하세요.');
-  ss.getSheetByName('설정').getRange(2, 1, 3, 2).setValues([
+  ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
+    ['메일테스트모드', 'TRUE'],
     ['템플릿문서ID', ''],
   ]);
 
@@ -788,8 +809,17 @@ function 설치_전체() {
 function 설치_샘플데이터() {
   _dev_가상데이터생성(28);
   전체재판정();
+
+  // 데모 시트가 바로 완성되게 일일집계(28일)·주간요약(4주)까지 채운다.
+  // (1~2분 걸릴 수 있습니다)
+  const 오늘 = _오늘0시_기준(new Date());
+  for (let d = 27; d >= 0; d--) 일일집계갱신(new Date(오늘.getTime() - d * 86400000));
+
+  const 이번주월요일 = new Date(오늘.getTime() - ((오늘.getDay() + 6) % 7) * 86400000);
+  for (let w = 3; w >= 0; w--) 주간요약갱신(new Date(이번주월요일.getTime() - w * 7 * 86400000));
+
   const n = _시트(SH.이력).getLastRow() - 1;
-  Logger.log('샘플 데이터 생성 완료. 이상이력 ' + n + '건.');
+  Logger.log('샘플 데이터 생성 완료. 이상이력 ' + n + '건 / 일일집계 28일 / 주간요약 ' + (_시트(SH.주간).getLastRow() - 1) + '주.');
   return '이상이력 ' + n + '건';
 }
 
@@ -807,6 +837,7 @@ function 설치_확인() {
     기준값행: _시트(SH.기준).getLastRow() - 1 + '행',
     설비수: _시트(SH.설비).getLastRow() - 1 + '대',
     관리자메일: String(설정('관리자이메일')),
+    메일테스트모드: String(설정('메일테스트모드')),
     템플릿ID: String(설정('템플릿문서ID')) ? '설정됨' : '비어 있음',
   };
   Logger.log(JSON.stringify(결과, null, 2));
