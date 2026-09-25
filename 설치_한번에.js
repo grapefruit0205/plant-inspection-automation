@@ -687,6 +687,40 @@ function 진단_메일보내기() {
 }
 
 /**
+ * 마지막 응답 1건을 기준값과 대조해, 왜 이상으로 잡히거나 안 잡히는지 보여준다.
+ * 폼 제출 자동 판정이 안 될 때 원인을 찾기 위한 진단.
+ */
+function 진단_마지막응답() {
+  const sh = _시트(SH.원본);
+  const v = sh.getDataRange().getValues();
+  const h = v[0].map(String);
+  const r = v[v.length - 1];
+  Logger.log('응답 데이터 ' + (v.length - 1) + '행 / 검사 대상은 마지막 행');
+
+  const 응답 = {};
+  h.forEach((name, j) => (응답[name] = r[j]));
+
+  const 기준 = 기준값읽기();
+  Logger.log('기준값 탭 컬럼명: ' + JSON.stringify(기준.map((k) => k.컬럼명)));
+  Logger.log('시트 헤더: ' + JSON.stringify(h));
+
+  let 없는것 = 0;
+  기준.forEach((k) => {
+    if (응답[k.컬럼명] === undefined) {
+      Logger.log('⚠️ 응답에 없는 컬럼명: "' + k.컬럼명 + '"');
+      없는것++;
+    }
+  });
+  if (없는것) Logger.log('→ 컬럼명이 어긋나 있습니다. 기준값 탭 원본컬럼명을 시트 헤더와 똑같이 맞추세요.');
+
+  Logger.log('응답값: ' + JSON.stringify(응답));
+  const 이상목록 = 이상치판정(응답, 기준);
+  Logger.log('판정 결과 ' + 이상목록.length + '건: ' + JSON.stringify(이상목록));
+  Logger.log('시트에 기록된 값 — 판정결과="' + String(r[h.indexOf('판정결과')]) + '" 이상항목수="' + String(r[h.indexOf('이상항목수')]) + '"');
+  return 이상목록;
+}
+
+/**
  * 판정결과가 비어 있는 응답 행을 찾아 판정·기록·알림을 수행한다.
  * 폼 제출 트리거가 실패해도 5분 안에 따라잡게 하는 안전망(시간 기반 트리거 대상).
  */
