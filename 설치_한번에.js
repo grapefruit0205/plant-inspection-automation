@@ -456,55 +456,79 @@ function 지난주월요일() {
   return new Date(now.getTime() - (day - 1 + 7) * 86400000);
 }
 
-function 이상표데이터(시작일, 종료일) {
-  const ih = _시트(SH.이력).getDataRange().getValues();
-  const h = ih.shift().map(String);
-  const e일 = h.indexOf('점검일');
-  const e설비 = h.indexOf('설비');
-  const e항목 = h.indexOf('항목명');
-  const e값 = h.indexOf('측정값');
-  const e기준 = h.indexOf('기준');
-  const e심 = h.indexOf('심각도');
+/* 보고서 서식값. A4(595pt) - 좌우 여백 2cm(56.7pt×2) = 본문 폭 약 481pt 기준으로 열 너비를 잡는다 */
+const 보고서양식 = {
+  글꼴: 'Noto Sans KR',
+  여백: 56.7,
+  진남: '#1F3864',
+  회색: '#666666',
+  본문: '#202124',
+  라벨배경: '#F1F3F4',
+  빨강: '#C00000',
+  음영: '#F8F9FA',
+  선: '#DADCE0',
+  정상배경: '#E2EFDA',
+  정상글: '#274E13',
+  바닥글: '#999999',
+  심각도배경: { 상: '#F4CCCC', 중: '#FCE5CD', 하: '#EFEFEF' },
+  최대행: 20,
+};
 
-  const rows = [['점검일', '설비', '항목', '측정값', '기준', '심각도']];
-  ih.forEach((r) => {
-    const d = String(r[e일]);
-    if (d >= 시작일 && d <= 종료일) {
-      rows.push([d, String(r[e설비]), String(r[e항목]), String(r[e값]), String(r[e기준]), String(r[e심])]);
-    }
+/**
+ * 기간 내 이상이력을 보고서용으로 읽는다.
+ * 심각도(상→중→하)·점검일 순으로 정렬해, 20건에서 잘려도 중요한 것이 먼저 남게 한다.
+ */
+function _이상상세(시작일, 종료일) {
+  const v = _시트(SH.이력).getDataRange().getValues();
+  const h = v.shift().map(String);
+  const 열 = {};
+  ['점검일', '설비', '항목명', '측정값', '기준', '심각도', '조치상태'].forEach((k) => (열[k] = h.indexOf(k)));
+  if (열.점검일 < 0) throw new Error('헤더 없음: "점검일" in ' + SH.이력);
+
+  const 값 = (r, k) => (열[k] < 0 || r[열[k]] === null ? '' : String(r[열[k]]).trim());
+  const 순서 = { 상: 0, 중: 1, 하: 2 };
+  const 등급 = (s) => (s in 순서 ? 순서[s] : 9);
+
+  const 목록 = [];
+  v.forEach((r) => {
+    // 시트가 날짜 문자열을 날짜형으로 바꿔 저장했을 수도 있어 둘 다 받는다
+    const raw = r[열.점검일];
+    const d = Object.prototype.toString.call(raw) === '[object Date]' ? _날짜(raw) : String(raw).trim();
+    if (!d || d < 시작일 || d > 종료일) return;
+    목록.push({
+      점검일: d,
+      설비: 값(r, '설비'),
+      항목: 값(r, '항목명'),
+      측정값: 값(r, '측정값'),
+      기준: 값(r, '기준'),
+      심각도: 값(r, '심각도'),
+      조치상태: 값(r, '조치상태') || '미조치',
+    });
   });
-  return rows.slice(0, 21); // 표가 너무 길어지지 않게 최대 20행
+
+  목록.sort((a, b) => 등급(a.심각도) - 등급(b.심각도) || (a.점검일 < b.점검일 ? -1 : a.점검일 > b.점검일 ? 1 : 0));
+  return { 행: 목록.slice(0, 보고서양식.최대행), 전체: 목록.length };
 }
 
 function 주간PDF생성() {
   const 요약 = 주간요약갱신(지난주월요일());
-  const 템플릿ID = String(설정('템플릿문서ID'));
   const 폴더ID = String(설정('PDF폴더ID'));
   const 관리자 = String(설정('관리자이메일'));
+  const 상세 = _이상상세(요약.시작일, 요약.종료일);
 
-  const 사본 = DriveApp.getFileById(템플릿ID).makeCopy('임시_' + 요약.주차);
-  const doc = DocumentApp.openById(사본.getId());
-  const body = doc.getBody();
-
-  Object.keys(요약).forEach((k) => body.replaceText('{{' + k + '}}', String(요약[k])));
-
-  // {{이상표}} 자리에 표 삽입
-  const 찾기 = body.findText('{{이상표}}');
-  if (찾기) {
-    const el = 찾기.getElement();
-    const 부모 = el.getParent();
-    const idx = body.getChildIndex(부모);
-    body.insertTable(idx, 이상표데이터(요약.시작일, 요약.종료일));
-    부모.removeFromParent();
+  // 템플릿 사본 대신 문서를 코드로 새로 만든다(서식 통제 + 자리표시자 불일치 방지)
+  const doc = DocumentApp.create('임시_' + 요약.주차);
+  const 임시파일 = DriveApp.getFileById(doc.getId());
+  let pdf, 파일;
+  try {
+    _보고서작성(doc, 요약, 상세);
+    doc.saveAndClose();
+    pdf = 임시파일.getAs('application/pdf').setName('주간설비점검보고_' + 요약.시작일 + '.pdf');
+    파일 = DriveApp.getFolderById(폴더ID).createFile(pdf);
+  } finally {
+    // 중간에 실패해도 임시 문서가 드라이브에 쌓이지 않게
+    try { 임시파일.setTrashed(true); } catch (e) { Logger.log('임시 문서 휴지통 이동 실패: ' + e.message); }
   }
-
-  doc.saveAndClose();
-
-  const pdf = DriveApp.getFileById(사본.getId())
-    .getAs('application/pdf')
-    .setName('주간설비점검보고_' + 요약.시작일 + '.pdf');
-  const 파일 = DriveApp.getFolderById(폴더ID).createFile(pdf);
-  사본.setTrashed(true);
 
   GmailApp.sendEmail(관리자, '[주간보고] ' + 요약.주차, '주간 설비 점검 보고서를 첨부합니다.', {
     attachments: [pdf],
@@ -515,6 +539,190 @@ function 주간PDF생성() {
   sh.getRange(sh.getLastRow(), _열(sh, 'PDF링크')).setValue(파일.getUrl());
 
   return 파일.getUrl();
+}
+
+/** 보고서 본문 구성. 서식은 실패해도 내용은 남도록 구간마다 _서식시도로 감싼다 */
+function _보고서작성(doc, 요약, 상세) {
+  const S = 보고서양식;
+  const body = doc.getBody();
+  _서식시도('여백', () => body.setMarginTop(S.여백).setMarginBottom(S.여백).setMarginLeft(S.여백).setMarginRight(S.여백));
+
+  // 1) 머리글 — 새 문서는 빈 문단 하나로 시작하므로 그것을 제목으로 쓴다
+  const 제목 = body.getParagraphs()[0] || body.appendParagraph('');
+  제목.setText('주간 설비 점검 보고서');
+  _글자(제목, 20, true, S.진남);
+  _문단간격(제목, 0, 2);
+
+  const 기간 = body.appendParagraph('기간 ' + 요약.시작일 + ' ~ ' + 요약.종료일);
+  _글자(기간, 11, false, S.회색);
+  _문단간격(기간, 0, 6);
+
+  _구분선(body, S.진남);
+  _간격(body, 10);
+
+  // 2) 요약 카드
+  const 이상 = Number(요약.이상건수) || 0;
+  const 미조치 = Number(요약.미조치) || 0;
+  const 카드 = _표(body, [
+    ['총 제출', '이상 건수', '이상률', '미조치'],
+    [String(요약.총제출) + '건', 이상 + '건', String(요약.이상률) + '%', 미조치 + '건'],
+  ], [120, 120, 120, 120], 7);
+  for (let c = 0; c < 4; c++) {
+    _셀(카드.getCell(0, c), { 크기: 9, 색: S.회색, 배경: S.라벨배경, 가운데: true });
+    const 경고 = (c === 1 && 이상 > 0) || (c === 3 && 미조치 > 0);
+    _셀(카드.getCell(1, c), { 크기: 14, 굵게: true, 색: 경고 ? S.빨강 : S.본문, 가운데: true });
+  }
+  _간격(body, 8);
+
+  // 3) TOP3
+  const 순위 = _표(body, [
+    ['TOP3 설비', _top3표시(요약.TOP3설비)],
+    ['TOP3 항목', _top3표시(요약.TOP3항목)],
+  ], [96, 384], 5);
+  for (let r = 0; r < 2; r++) {
+    _셀(순위.getCell(r, 0), { 크기: 9, 색: S.회색, 배경: S.라벨배경 });
+    _셀(순위.getCell(r, 1), { 크기: 10, 색: S.본문 });
+  }
+
+  // 4) 이상 상세
+  const 소제목 = body.appendParagraph('▶ 이상 상세');
+  _글자(소제목, 13, true, S.진남);
+  _문단간격(소제목, 16, 6);
+
+  if (!상세.전체) {
+    // 5) 0건이면 빈 표 대신 안내
+    const 안내 = _표(body, [['이번 주 기준 초과 항목이 없습니다.']], [480], 10, S.정상배경);
+    _셀(안내.getCell(0, 0), { 크기: 10, 색: S.정상글, 배경: S.정상배경, 가운데: true });
+  } else {
+    const 머리 = ['점검일', '설비', '항목', '측정값', '기준', '심각도', '조치상태'];
+    const 가운데열 = [0, 1, 5, 6];
+    const 행들 = [머리].concat(상세.행.map((x) => [x.점검일, x.설비, x.항목, x.측정값, x.기준, x.심각도, x.조치상태]));
+    const 표 = _표(body, 행들, [64, 46, 92, 90, 80, 44, 64], 4);
+
+    머리.forEach((_, c) => _셀(표.getCell(0, c), { 크기: 9.5, 굵게: true, 색: '#FFFFFF', 배경: S.진남, 가운데: true }));
+    상세.행.forEach((x, i) => {
+      const r = i + 1;
+      const 줄배경 = r % 2 === 0 ? S.음영 : null;
+      머리.forEach((_, c) => {
+        const o = { 크기: 9, 색: S.본문, 배경: 줄배경, 가운데: 가운데열.indexOf(c) > -1 };
+        if (c === 5) { o.배경 = S.심각도배경[x.심각도] || 줄배경; o.굵게 = x.심각도 === '상'; }
+        if (c === 6 && x.조치상태 === '미조치') { o.색 = S.빨강; o.굵게 = true; }
+        _셀(표.getCell(r, c), o);
+      });
+    });
+
+    // 5) 20건 초과분 안내. 셀 병합(merge)은 동작이 불확실해 표 바로 아래 문단으로 둔다
+    if (상세.전체 > 상세.행.length) {
+      const 외 = body.appendParagraph('외 ' + (상세.전체 - 상세.행.length) + '건 — 이상이력 탭 참조');
+      _글자(외, 9, false, S.회색);
+      _문단간격(외, 4, 0);
+      _서식시도('외 N건 정렬', () => 외.setAlignment(DocumentApp.HorizontalAlignment.RIGHT));
+    }
+  }
+
+  // 6) 바닥글 — 문서 바닥글 영역이 안 되면 본문 끝에 붙인다
+  let 시트명 = '점검시스템_포트폴리오';
+  try { 시트명 = SpreadsheetApp.getActiveSpreadsheet().getName() || 시트명; } catch (e) {}
+  const 문구 = '생성 ' + 요약.생성일시 + ' · ' + 시트명 + ' · 데이터: 합성(가상)';
+  let 바닥 = null;
+  try {
+    const f = doc.getFooter() || doc.addFooter();
+    바닥 = f.getParagraphs()[0] || f.appendParagraph('');
+    바닥.setText(문구);
+  } catch (e) {
+    Logger.log('[서식 건너뜀] 바닥글 영역: ' + e.message);
+    바닥 = null;
+  }
+  if (!바닥) {
+    바닥 = body.appendParagraph(문구);
+    _문단간격(바닥, 18, 0);
+  }
+  _글자(바닥, 8, false, S.바닥글);
+  _서식시도('바닥글 정렬', () => 바닥.setAlignment(DocumentApp.HorizontalAlignment.RIGHT));
+}
+
+/** 서식 한 구간 실행. 실패해도 보고서 생성은 계속한다 */
+function _서식시도(이름, 작업) {
+  try {
+    작업();
+  } catch (e) {
+    Logger.log('[서식 건너뜀] ' + 이름 + ': ' + e.message);
+  }
+}
+
+/** 문단·셀 글자 서식. 글꼴·크기는 따로 감싸 하나가 실패해도 굵기·색은 들어가게 한다 */
+function _글자(el, 크기, 굵게, 색) {
+  _서식시도('글자', () => {
+    const t = el.editAsText();
+    try { t.setFontFamily(보고서양식.글꼴); } catch (e) {}
+    try { t.setFontSize(크기); } catch (e) { t.setFontSize(Math.round(크기)); } // 9.5 같은 소수 크기 거부 대비
+    t.setBold(!!굵게);
+    t.setForegroundColor(색 || 보고서양식.본문);
+  });
+}
+
+function _문단간격(p, 앞, 뒤) {
+  _서식시도('문단 간격', () => p.setSpacingBefore(앞).setSpacingAfter(뒤).setLineSpacing(1.15));
+}
+
+/** 표와 표 사이를 원하는 높이로 띄우는 빈 문단(기본 11pt 줄 높이를 없애려고 글자 크기를 1로) */
+function _간격(body, pt) {
+  const p = body.appendParagraph('');
+  _서식시도('간격', () => {
+    p.setAttributes({ [DocumentApp.Attribute.FONT_SIZE]: 1 });
+    p.setSpacingBefore(0).setSpacingAfter(pt).setLineSpacing(1);
+  });
+  return p;
+}
+
+function _셀문단(cell) {
+  return cell.getChild(0).asParagraph();
+}
+
+/** 표를 붙이고 공통 서식(테두리·열 너비·안쪽 여백)을 준다 */
+function _표(body, 행들, 열너비, 안쪽, 테두리색) {
+  const t = body.appendTable(행들.map((r) => r.map((x) => String(x === null || x === undefined ? '' : x))));
+  const 여백 = 안쪽 || 4;
+  const 셀마다 = (fn) => {
+    for (let r = 0; r < t.getNumRows(); r++) {
+      const row = t.getRow(r);
+      for (let c = 0; c < row.getNumCells(); c++) fn(row.getCell(c));
+    }
+  };
+  _서식시도('표 테두리', () => { t.setBorderColor(테두리색 || 보고서양식.선); t.setBorderWidth(0.75); });
+  _서식시도('표 열 너비', () => 열너비.forEach((w, i) => t.setColumnWidth(i, w)));
+  _서식시도('셀 여백', () => 셀마다((cell) => cell.setPaddingTop(여백).setPaddingBottom(여백).setPaddingLeft(6).setPaddingRight(6)));
+  _서식시도('셀 세로 정렬', () => 셀마다((cell) => cell.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER)));
+  _서식시도('셀 문단 간격', () => 셀마다((cell) => _셀문단(cell).setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1.1)));
+  return t;
+}
+
+/** 셀 하나 서식. o = { 크기, 굵게, 색, 배경, 가운데 } */
+function _셀(cell, o) {
+  _글자(cell, o.크기, o.굵게, o.색);
+  if (o.배경) _서식시도('셀 배경', () => cell.setBackgroundColor(o.배경));
+  if (o.가운데) _서식시도('셀 가로 정렬', () => _셀문단(cell).setAlignment(DocumentApp.HorizontalAlignment.CENTER));
+}
+
+/** 머리글 아래 굵은 줄. 문단 테두리는 DocumentApp에서 못 쓰니 색 채운 1칸 표로 대신한다 */
+function _구분선(body, 색) {
+  const t = body.appendTable([[' ']]);
+  const cell = t.getCell(0, 0);
+  _서식시도('구분선 색', () => { t.setBorderColor(색); cell.setBackgroundColor(색); });
+  _서식시도('구분선 두께', () => {
+    cell.setPaddingTop(0).setPaddingBottom(0).setPaddingLeft(0).setPaddingRight(0);
+    _셀문단(cell).setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+    cell.editAsText().setFontSize(2);
+  });
+  _서식시도('구분선 테두리', () => t.setBorderWidth(0));
+  return t;
+}
+
+/** 'PU-03(5), AC-02(4)' → 'PU-03 5건 · AC-02 4건' */
+function _top3표시(s) {
+  const v = String(s || '').trim();
+  if (!v) return '—';
+  return v.replace(/\((\d+)\)/g, ' $1건').split(', ').join('   ·   ');
 }
 
 /* ============================ 9. 트리거 설정 ============================ */
@@ -883,13 +1091,14 @@ function 메뉴_주간PDF() {
   return url;
 }
 /* ============================================================
- *  2부 — 자동 설치 (폼·시트·기준값·템플릿·트리거 생성)
+ *  2부 — 자동 설치 (폼·시트·기준값·PDF폴더·트리거 생성)
  * ============================================================ */
 /**
  * 자동 설치 스크립트
  * ------------------------------------------------------------------
  * 손으로 만들던 작업(폼 12문항, 시트 탭 7개, 기준값, 설비목록, 설정,
- * 주간보고 템플릿, 트리거)을 코드로 한 번에 만듭니다.
+ * PDF 저장 폴더, 트리거)을 코드로 한 번에 만듭니다.
+ * (주간보고 문서는 주간PDF생성()이 매번 코드로 새로 만들므로 템플릿이 필요 없습니다)
  *
  * 사용법:
  *   1) 이 스크립트가 연결된 구글시트를 엽니다.
@@ -928,22 +1137,6 @@ const 기준값데이터 = [
   ['밸브잠금', '밸브 잠금 상태', '값일치', '', '해제됨', '상', 'safety@example.com', true],
   ['안전커버', '안전 커버·방호', '값일치', '', '파손', '상', 'safety@example.com', true],
   ['윤활급유', '윤활 급유', '값일치', '', '미실시', '하', 'mech@example.com', true],
-];
-
-const 템플릿본문 = [
-  '주간 설비 점검 보고서',
-  '',
-  '기간: {{기간}}',
-  '총 제출: {{총제출}}건',
-  '이상 건수: {{이상건수}}건 (이상률 {{이상률}}%)',
-  'TOP3 설비: {{TOP3설비}}',
-  'TOP3 항목: {{TOP3항목}}',
-  '미조치: {{미조치}}건',
-  '',
-  '[이상 상세]',
-  '{{이상표}}',
-  '',
-  '생성일시: {{생성일시}}',
 ];
 
 /** 숫자 범위 검증(안내문구는 지원 여부가 불확실해 실패해도 무시) */
@@ -1076,36 +1269,16 @@ function 설치_전체() {
     if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
   }
   if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 시트 상단 [점검시스템] → 알림 메일 주소 바꾸기 로 설정하세요.');
+  // 5) PDF 저장 폴더 ------------------------------------------
+  const 폴더검색 = DriveApp.getFoldersByName('점검시스템_포트폴리오');
+  const 폴더 = 폴더검색.hasNext() ? 폴더검색.next() : DriveApp.createFolder('점검시스템_포트폴리오');
+
   ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
     ['메일테스트모드', 'TRUE'],
-    ['템플릿문서ID', ''],
+    ['PDF폴더ID', 폴더.getId()],
   ]);
-
-  // 5) 주간보고 템플릿 문서 -----------------------------------
-  let 폴더;
-  const 폴더검색 = DriveApp.getFoldersByName('점검시스템_포트폴리오');
-  폴더 = 폴더검색.hasNext() ? 폴더검색.next() : DriveApp.createFolder('점검시스템_포트폴리오');
-
-  const 기존문서 = 폴더.getFilesByName('주간보고_템플릿');
-  const 템플릿 = 기존문서.hasNext()
-    ? DocumentApp.openById(기존문서.next().getId())
-    : DocumentApp.create('주간보고_템플릿');
-  const body = 템플릿.getBody();
-  body.clear();
-  템플릿본문.forEach((줄, i) => (i === 0 ? body.appendParagraph(줄).setHeading(DocumentApp.ParagraphHeading.HEADING1) : body.appendParagraph(줄)));
-  body.setFontFamily('Noto Sans KR');
-  템플릿.saveAndClose();
-  try { DriveApp.getFileById(템플릿.getId()).moveTo(폴더); } catch (e) {}
-
-  const 설정시트 = ss.getSheetByName('설정');
-  const 설정값 = 설정시트.getDataRange().getValues();
-  for (let i = 1; i < 설정값.length; i++) {
-    if (설정값[i][0] === '템플릿문서ID') 설정시트.getRange(i + 1, 2).setValue(템플릿.getId());
-  }
-  설정시트.appendRow(['PDF폴더ID', 폴더.getId()]);
-  로그.push('템플릿 문서: ' + 템플릿.getUrl());
   로그.push('PDF 저장 폴더: ' + 폴더.getUrl());
 
   // 6) 트리거 -------------------------------------------------
@@ -1153,7 +1326,7 @@ function 설치_확인() {
     설비수: _시트(SH.설비).getLastRow() - 1 + '대',
     관리자메일: String(설정('관리자이메일')),
     메일테스트모드: String(설정('메일테스트모드')),
-    템플릿ID: String(설정('템플릿문서ID')) ? '설정됨' : '비어 있음',
+    PDF폴더: String(설정('PDF폴더ID')) ? '설정됨' : '비어 있음',
   };
   Logger.log(JSON.stringify(결과, null, 2));
   return 결과;

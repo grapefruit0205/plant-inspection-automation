@@ -2,7 +2,8 @@
  * 자동 설치 스크립트
  * ------------------------------------------------------------------
  * 손으로 만들던 작업(폼 12문항, 시트 탭 7개, 기준값, 설비목록, 설정,
- * 주간보고 템플릿, 트리거)을 코드로 한 번에 만듭니다.
+ * PDF 저장 폴더, 트리거)을 코드로 한 번에 만듭니다.
+ * (주간보고 문서는 주간PDF생성()이 매번 코드로 새로 만들므로 템플릿이 필요 없습니다)
  *
  * 사용법:
  *   1) 이 스크립트가 연결된 구글시트를 엽니다.
@@ -41,22 +42,6 @@ const 기준값데이터 = [
   ['밸브잠금', '밸브 잠금 상태', '값일치', '', '해제됨', '상', 'safety@example.com', true],
   ['안전커버', '안전 커버·방호', '값일치', '', '파손', '상', 'safety@example.com', true],
   ['윤활급유', '윤활 급유', '값일치', '', '미실시', '하', 'mech@example.com', true],
-];
-
-const 템플릿본문 = [
-  '주간 설비 점검 보고서',
-  '',
-  '기간: {{기간}}',
-  '총 제출: {{총제출}}건',
-  '이상 건수: {{이상건수}}건 (이상률 {{이상률}}%)',
-  'TOP3 설비: {{TOP3설비}}',
-  'TOP3 항목: {{TOP3항목}}',
-  '미조치: {{미조치}}건',
-  '',
-  '[이상 상세]',
-  '{{이상표}}',
-  '',
-  '생성일시: {{생성일시}}',
 ];
 
 /** 숫자 범위 검증(안내문구는 지원 여부가 불확실해 실패해도 무시) */
@@ -189,36 +174,16 @@ function 설치_전체() {
     if (!내메일) { try { 내메일 = Session.getEffectiveUser().getEmail(); } catch (e) {} }
   }
   if (!내메일) 로그.push('⚠️ 관리자 이메일을 자동으로 읽지 못했습니다. 시트 상단 [점검시스템] → 알림 메일 주소 바꾸기 로 설정하세요.');
+  // 5) PDF 저장 폴더 ------------------------------------------
+  const 폴더검색 = DriveApp.getFoldersByName('점검시스템_포트폴리오');
+  const 폴더 = 폴더검색.hasNext() ? 폴더검색.next() : DriveApp.createFolder('점검시스템_포트폴리오');
+
   ss.getSheetByName('설정').getRange(2, 1, 4, 2).setValues([
     ['관리자이메일', 내메일],
     ['알림활성화', 'TRUE'],
     ['메일테스트모드', 'TRUE'],
-    ['템플릿문서ID', ''],
+    ['PDF폴더ID', 폴더.getId()],
   ]);
-
-  // 5) 주간보고 템플릿 문서 -----------------------------------
-  let 폴더;
-  const 폴더검색 = DriveApp.getFoldersByName('점검시스템_포트폴리오');
-  폴더 = 폴더검색.hasNext() ? 폴더검색.next() : DriveApp.createFolder('점검시스템_포트폴리오');
-
-  const 기존문서 = 폴더.getFilesByName('주간보고_템플릿');
-  const 템플릿 = 기존문서.hasNext()
-    ? DocumentApp.openById(기존문서.next().getId())
-    : DocumentApp.create('주간보고_템플릿');
-  const body = 템플릿.getBody();
-  body.clear();
-  템플릿본문.forEach((줄, i) => (i === 0 ? body.appendParagraph(줄).setHeading(DocumentApp.ParagraphHeading.HEADING1) : body.appendParagraph(줄)));
-  body.setFontFamily('Noto Sans KR');
-  템플릿.saveAndClose();
-  try { DriveApp.getFileById(템플릿.getId()).moveTo(폴더); } catch (e) {}
-
-  const 설정시트 = ss.getSheetByName('설정');
-  const 설정값 = 설정시트.getDataRange().getValues();
-  for (let i = 1; i < 설정값.length; i++) {
-    if (설정값[i][0] === '템플릿문서ID') 설정시트.getRange(i + 1, 2).setValue(템플릿.getId());
-  }
-  설정시트.appendRow(['PDF폴더ID', 폴더.getId()]);
-  로그.push('템플릿 문서: ' + 템플릿.getUrl());
   로그.push('PDF 저장 폴더: ' + 폴더.getUrl());
 
   // 6) 트리거 -------------------------------------------------
@@ -266,7 +231,7 @@ function 설치_확인() {
     설비수: _시트(SH.설비).getLastRow() - 1 + '대',
     관리자메일: String(설정('관리자이메일')),
     메일테스트모드: String(설정('메일테스트모드')),
-    템플릿ID: String(설정('템플릿문서ID')) ? '설정됨' : '비어 있음',
+    PDF폴더: String(설정('PDF폴더ID')) ? '설정됨' : '비어 있음',
   };
   Logger.log(JSON.stringify(결과, null, 2));
   return 결과;
