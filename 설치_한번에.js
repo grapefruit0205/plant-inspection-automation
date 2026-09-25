@@ -497,7 +497,7 @@ function 주간PDF생성() {
 function 트리거설정() {
   ScriptApp.getProjectTriggers().forEach((t) => {
     const f = t.getHandlerFunction();
-    if (f === 'onFormSubmit' || f === 'weeklyReport') ScriptApp.deleteTrigger(t);
+    if (f === 'onFormSubmit' || f === 'weeklyReport' || f === '미판정행처리') ScriptApp.deleteTrigger(t);
   });
 
   ScriptApp.newTrigger('onFormSubmit')
@@ -511,7 +511,14 @@ function 트리거설정() {
     .atHour(7)
     .create();
 
-  Logger.log('트리거 2개 생성 완료: onFormSubmit, weeklyReport');
+  // 안전망: 폼 제출 트리거가 실패해도 5분 안에 미판정 행을 따라잡는다
+  ScriptApp.newTrigger('미판정행처리')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  const 목록 = ScriptApp.getProjectTriggers().map((t) => t.getHandlerFunction() + ' [' + t.getEventType() + ']');
+  Logger.log('트리거 ' + 목록.length + '개: ' + 목록.join(' / '));
 }
 
 /* ============================ 10. 가상 데이터 ============================ */
@@ -608,6 +615,7 @@ function onOpen() {
     .createMenu('점검시스템')
     .addItem('알림 메일 주소 바꾸기', '설정_관리자메일바꾸기')
     .addItem('주간 PDF 보고서 만들기', '메뉴_주간PDF')
+    .addItem('밀린 응답 지금 처리', '메뉴_미판정처리')
     .addSeparator()
     .addItem('판정 로직 테스트', '테스트_판정')
     .addItem('이상이력 전체 재판정', '전체재판정')
@@ -676,6 +684,56 @@ function 진단_메일보내기() {
   );
   Logger.log('발송 완료 → ' + 관리자 + '  (받은편지함과 스팸함을 함께 확인하세요)');
   return 관리자;
+}
+
+/**
+ * 판정결과가 비어 있는 응답 행을 찾아 판정·기록·알림을 수행한다.
+ * 폼 제출 트리거가 실패해도 5분 안에 따라잡게 하는 안전망(시간 기반 트리거 대상).
+ */
+function 미판정행처리() {
+  const sh = _시트(SH.원본);
+  const v = sh.getDataRange().getValues();
+  if (v.length < 2) return 0;
+
+  const h = v.shift().map(String);
+  const 판정열 = h.indexOf('판정결과');
+  const ts열 = _타임스탬프열(h);
+  const 기준목록 = 기준값읽기();
+
+  const 처리할것 = [];
+  v.forEach((r, i) => {
+    if (String(r[판정열] || '').trim() !== '') return;
+    if (String(r[ts열] || '').trim() === '') return; // 빈 행
+    처리할것.push({ 행: i + 2, 응답: r });
+  });
+
+  처리할것.forEach(({ 행, 응답: r }) => {
+    const 응답 = {};
+    h.forEach((name, j) => (응답[name] = r[j]));
+    const 시각 = new Date(r[ts열]);
+    const 이상목록 = 이상치판정(응답, 기준목록);
+    if (이상목록.length) {
+      이상이력기록(응답, 이상목록, 시각);
+      메일알림(응답, 이상목록, 시각);
+    }
+    sh.getRange(행, 판정열 + 1, 1, 2).setValues([[이상목록.length ? '이상' : '정상', 이상목록.length]]);
+  });
+
+  if (처리할것.length) {
+    일일집계갱신(new Date());
+    Logger.log('미판정 행 ' + 처리할것.length + '건 처리·알림 완료');
+  }
+  return 처리할것.length;
+}
+
+function 메뉴_미판정처리() {
+  let ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+  const n = 미판정행처리();
+  const 말 = n ? '밀린 응답 ' + n + '건을 처리했습니다.' : '처리할 응답이 없습니다.';
+  if (ui) ui.alert(말);
+  else Logger.log(말);
+  return n;
 }
 
 function 메뉴_주간PDF() {
